@@ -3,21 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { criarClienteServidor } from "@/lib/supabase/servidor";
 import { gerarSlug } from "@/lib/formatacao";
-import { DOMINIO_PERMITIDO } from "@/lib/constantes";
 import type { DadosProduto, Resultado, Status } from "@/lib/tipos";
-
-/** Confere de novo, no servidor, quem está pedindo a gravação. */
-async function exigirUsuarioPm3() {
-  const supabase = await criarClienteServidor();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user || !user.email?.toLowerCase().endsWith(DOMINIO_PERMITIDO)) {
-    return { supabase, usuario: null };
-  }
-  return { supabase, usuario: user };
-}
 
 function limpar(texto: string | undefined | null) {
   return (texto ?? "").trim();
@@ -150,10 +136,9 @@ async function sincronizarRelacionados(
   }
 }
 
-/** Cria um produto novo. O autor e as datas são preenchidos pelo banco. */
+/** Cria um produto novo. As datas e a assinatura são preenchidas pelo banco. */
 export async function criarProduto(dados: DadosProduto): Promise<Resultado> {
-  const { supabase, usuario } = await exigirUsuarioPm3();
-  if (!usuario) return { ok: false, erro: "Sua sessão expirou. Entre de novo para salvar." };
+  const supabase = await criarClienteServidor();
 
   const problema = validar(dados);
   if (problema) return { ok: false, erro: problema };
@@ -181,8 +166,7 @@ export async function criarProduto(dados: DadosProduto): Promise<Resultado> {
 
 /** Atualiza um produto existente. O endereço (link) não muda. */
 export async function atualizarProduto(id: string, dados: DadosProduto): Promise<Resultado> {
-  const { supabase, usuario } = await exigirUsuarioPm3();
-  if (!usuario) return { ok: false, erro: "Sua sessão expirou. Entre de novo para salvar." };
+  const supabase = await criarClienteServidor();
 
   const problema = validar(dados);
   if (problema) return { ok: false, erro: problema };
@@ -221,8 +205,7 @@ export async function salvarGovernanca(
     data_revisao: string;
   },
 ): Promise<Resultado> {
-  const { supabase, usuario } = await exigirUsuarioPm3();
-  if (!usuario) return { ok: false, erro: "Sua sessão expirou. Entre de novo para salvar." };
+  const supabase = await criarClienteServidor();
 
   if (!limpar(campos.nome_oficial)) return { ok: false, erro: "Escreva o nome oficial do produto." };
   if (!limpar(campos.nome_responsavel)) {

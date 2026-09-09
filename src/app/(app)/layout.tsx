@@ -1,14 +1,11 @@
-import { redirect } from "next/navigation";
 import BarraTopo from "@/components/BarraTopo";
-import { perfilAtual } from "@/lib/dados";
+import AvisoModoTeste from "@/components/AvisoModoTeste";
 
-export default async function LayoutApp({ children }: { children: React.ReactNode }) {
-  const perfil = await perfilAtual();
-  if (!perfil) redirect("/login");
-
+export default function LayoutApp({ children }: { children: React.ReactNode }) {
   return (
     <>
-      <BarraTopo nome={perfil.nome} email={perfil.email} />
+      <AvisoModoTeste />
+      <BarraTopo />
       {children}
     </>
   );

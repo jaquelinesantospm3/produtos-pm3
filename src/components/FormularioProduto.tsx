@@ -86,17 +86,15 @@ function aPartirDoProduto(produto: ProdutoComRelacionados): DadosProduto {
 export default function FormularioProduto({
   produto,
   disponiveis,
-  nomeUsuario,
 }: {
   produto?: ProdutoComRelacionados;
   disponiveis: ProdutoResumo[];
-  nomeUsuario: string;
 }) {
   const router = useRouter();
   const edicao = Boolean(produto);
 
   const [dados, setDados] = useState<DadosProduto>(
-    produto ? aPartirDoProduto(produto) : { ...VAZIO, nome_responsavel: nomeUsuario },
+    produto ? aPartirDoProduto(produto) : { ...VAZIO },
   );
   const [etapa, setEtapa] = useState(1);
   const [erro, setErro] = useState("");
@@ -222,11 +220,7 @@ export default function FormularioProduto({
             </select>
           </Campo>
 
-          <Campo
-            rotulo="Nome do responsável"
-            dica="Quem responde por esse produto. Já vem com o seu nome, mas pode trocar."
-            obrigatorio
-          >
+          <Campo rotulo="Nome do responsável" dica="Quem responde por esse produto" obrigatorio>
             <input
               value={dados.nome_responsavel}
               onChange={(e) => set("nome_responsavel", e.target.value)}
@@ -529,7 +523,8 @@ export default function FormularioProduto({
           </Campo>
 
           <p className="mb-5 text-xs text-pm3-faint">
-            A data e o seu nome são gravados automaticamente junto com o registro.
+            A data da alteração é gravada automaticamente. Enquanto o sistema estiver sem login,
+            o histórico registra as mudanças como &ldquo;Modo de teste&rdquo;.
           </p>
 
           <div className="mt-2 flex gap-2">

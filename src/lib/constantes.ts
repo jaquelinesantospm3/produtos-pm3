@@ -23,9 +23,6 @@ export const TIMES = [
   "Outro",
 ];
 
-/** Só e-mails deste domínio entram. A mesma regra vale no banco (RLS). */
-export const DOMINIO_PERMITIDO = "@pm3.com.br";
-
 /** A partir de quantos dias sem atualização o produto é marcado para revisão. */
 export const DIAS_ATE_REVISAO = 90;
 

@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import FormularioProduto from "@/components/FormularioProduto";
-import { buscarProduto, listarProdutosResumidos, perfilAtual } from "@/lib/dados";
+import { buscarProduto, listarProdutosResumidos } from "@/lib/dados";
 
 export const dynamic = "force-dynamic";
 
@@ -16,19 +16,12 @@ export default async function PaginaEditarProduto({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const [produto, disponiveis, perfil] = await Promise.all([
+  const [produto, disponiveis] = await Promise.all([
     buscarProduto(slug),
     listarProdutosResumidos(),
-    perfilAtual(),
   ]);
 
   if (!produto) notFound();
 
-  return (
-    <FormularioProduto
-      produto={produto}
-      disponiveis={disponiveis}
-      nomeUsuario={perfil?.nome ?? ""}
-    />
-  );
+  return <FormularioProduto produto={produto} disponiveis={disponiveis} />;
 }
