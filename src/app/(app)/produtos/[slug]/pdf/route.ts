@@ -1,32 +1,41 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { criarClienteServidor } from "@/lib/supabase/servidor";
-import { BUCKET_PDF } from "@/lib/constantes";
+import { arquivos, banco } from "@/lib/banco";
 
 /**
- * O bucket de PDFs é privado. Aqui geramos um link temporário (5 minutos)
- * para quem está logado e redirecionamos direto para o arquivo.
+ * Entrega o PDF do produto.
+ *
+ * O bucket do R2 não é público: ninguém alcança o arquivo por fora. Quem
+ * chega até aqui já passou pelo Cloudflare Access, então basta ler o
+ * objeto e devolver. Não existe mais link temporário para expirar.
  */
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const supabase = await criarClienteServidor();
+  const db = await banco();
 
-  const { data: produto } = await supabase
-    .from("produtos")
-    .select("pdf_path")
-    .eq("slug", slug)
-    .maybeSingle();
+  const produto = await db
+    .prepare("select pdf_path, pdf_nome from produtos where slug = ?")
+    .bind(slug)
+    .first<{ pdf_path: string; pdf_nome: string }>();
 
   if (!produto?.pdf_path) {
     return new NextResponse("Este produto ainda não tem PDF cadastrado.", { status: 404 });
   }
 
-  const { data, error } = await supabase.storage
-    .from(BUCKET_PDF)
-    .createSignedUrl(produto.pdf_path, 300);
+  const bucket = await arquivos();
+  const objeto = await bucket.get(produto.pdf_path);
 
-  if (error || !data) {
+  if (!objeto) {
     return new NextResponse("Não foi possível abrir o PDF agora. Tente de novo.", { status: 500 });
   }
 
-  return NextResponse.redirect(data.signedUrl);
+  const nome = (produto.pdf_nome || `${slug}.pdf`).replace(/"/g, "");
+
+  return new NextResponse(objeto.body as unknown as ReadableStream, {
+    headers: {
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `inline; filename="${nome}"`,
+      // Conteúdo restrito: nunca guardar em cache compartilhado.
+      "Cache-Control": "private, no-store",
+    },
+  });
 }

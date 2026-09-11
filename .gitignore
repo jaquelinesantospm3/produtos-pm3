@@ -7,6 +7,9 @@ build
 npm-debug.log*
 .env
 .env*.local
-.vercel
+.dev.vars
+.open-next
+.wrangler
 next-env.d.ts
+# cloudflare-env.d.ts é versionado: descreve os bindings do Worker
 *.tsbuildinfo

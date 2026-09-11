@@ -81,11 +81,6 @@ export type Log = {
   criado_em: string;
 };
 
-export type Perfil = {
-  id: string;
-  email: string;
-  nome: string;
-};
 
 /** O que o formulário de cadastro/edição envia para o servidor. */
 export type DadosProduto = {

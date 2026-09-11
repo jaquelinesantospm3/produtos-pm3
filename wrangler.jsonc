@@ -1,0 +1,61 @@
+/**
+ * Configuração do Worker da Cloudflare.
+ *
+ * O app roda inteiro aqui: páginas, server actions e rotas.
+ * Os dados ficam no D1 (banco) e os PDFs no R2 (arquivos).
+ * Quem pode entrar é decidido pelo Cloudflare Access, antes de chegar neste Worker.
+ *
+ * Os recursos abaixo já existem na conta; não precisa criar de novo.
+ */
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "produtos-pm3",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+
+  // Conta que tem o domínio pm3.com.br.
+  "account_id": "656714efa33cb4e8b8b3a6504d48f40b",
+
+  // O sistema atende só neste endereço, que é o protegido pelo Cloudflare Access.
+  "routes": [
+    {
+      "pattern": "produtos.pm3.com.br",
+      "custom_domain": true
+    }
+  ],
+
+  // O endereço .workers.dev fica desligado de propósito: ele seria uma porta
+  // paralela, sem passar pela política do Access.
+  "workers_dev": false,
+
+  // Arquivos estáticos gerados pelo build do Next.js.
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+
+  "observability": {
+    "enabled": true
+  },
+
+  // Banco de dados do catálogo.
+  // Recriar do zero:  npx wrangler d1 create produtos-pm3
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "produtos-pm3",
+      "database_id": "2964c432-a7ce-4347-8490-e2f8e45f5b57",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // Arquivos (PDFs dos produtos). Recriar do zero:
+  //   npx wrangler r2 bucket create produtos-pm3-pdf
+  "r2_buckets": [
+    {
+      "binding": "PDF_BUCKET",
+      "bucket_name": "produtos-pm3-pdf"
+    }
+  ]
+}

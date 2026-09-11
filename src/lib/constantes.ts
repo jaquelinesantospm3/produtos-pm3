@@ -26,4 +26,3 @@ export const TIMES = [
 /** A partir de quantos dias sem atualização o produto é marcado para revisão. */
 export const DIAS_ATE_REVISAO = 90;
 
-export const BUCKET_PDF = "produtos-pdf";

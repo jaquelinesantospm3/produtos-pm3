@@ -1,80 +1,88 @@
 import "server-only";
-import { criarClienteServidor } from "@/lib/supabase/servidor";
+import { banco, montarProduto, montarResumo, marcadores, CAMPOS_RESUMO } from "@/lib/banco";
 import type { Log, Produto, ProdutoComRelacionados, ProdutoResumo } from "@/lib/tipos";
 
-const CAMPOS_RESUMO = "id, slug, nome_oficial, nome_curto, categoria, status";
+/**
+ * Leitura dos dados. Tudo vem do D1.
+ *
+ * A ordenação por nome é feita aqui no código, e não no SQL, porque o
+ * SQLite ordena letra por letra pelo código do caractere — "Ágil" cairia
+ * depois de "Zoom". O localeCompare em pt-BR resolve acento e maiúscula.
+ */
+
+function porNome<T extends { nome_oficial: string }>(lista: T[]): T[] {
+  return lista.sort((a, b) => a.nome_oficial.localeCompare(b.nome_oficial, "pt-BR"));
+}
 
 export async function listarProdutos(): Promise<Produto[]> {
-  const supabase = await criarClienteServidor();
-  const { data, error } = await supabase
-    .from("produtos")
-    .select("*")
-    .order("nome_oficial", { ascending: true });
-
-  if (error) throw new Error(error.message);
-  return (data ?? []) as Produto[];
+  const db = await banco();
+  const { results } = await db.prepare("select * from produtos").all<Record<string, unknown>>();
+  return porNome((results ?? []).map(montarProduto));
 }
 
 export async function listarProdutosResumidos(): Promise<ProdutoResumo[]> {
-  const supabase = await criarClienteServidor();
-  const { data, error } = await supabase
-    .from("produtos")
-    .select(CAMPOS_RESUMO)
-    .order("nome_oficial", { ascending: true });
-
-  if (error) throw new Error(error.message);
-  return (data ?? []) as ProdutoResumo[];
+  const db = await banco();
+  const { results } = await db
+    .prepare(`select ${CAMPOS_RESUMO} from produtos`)
+    .all<Record<string, unknown>>();
+  return porNome((results ?? []).map(montarResumo));
 }
 
 export async function buscarProduto(slug: string): Promise<ProdutoComRelacionados | null> {
-  const supabase = await criarClienteServidor();
+  const db = await banco();
 
-  const { data: produto } = await supabase
-    .from("produtos")
-    .select("*")
-    .eq("slug", slug)
-    .maybeSingle();
+  const linha = await db
+    .prepare("select * from produtos where slug = ?")
+    .bind(slug)
+    .first<Record<string, unknown>>();
 
-  if (!produto) return null;
+  if (!linha) return null;
+  const produto = montarProduto(linha);
 
-  const { data: vinculos } = await supabase
-    .from("produto_relacionados")
-    .select("relacionado_id")
-    .eq("produto_id", produto.id);
+  const { results: vinculos } = await db
+    .prepare("select relacionado_id from produto_relacionados where produto_id = ?")
+    .bind(produto.id)
+    .all<{ relacionado_id: string }>();
 
   const ids = (vinculos ?? []).map((v) => v.relacionado_id);
 
   let relacionados: ProdutoResumo[] = [];
   if (ids.length > 0) {
-    const { data } = await supabase
-      .from("produtos")
-      .select(CAMPOS_RESUMO)
-      .in("id", ids)
-      .order("nome_oficial", { ascending: true });
-    relacionados = (data ?? []) as ProdutoResumo[];
+    const { results } = await db
+      .prepare(`select ${CAMPOS_RESUMO} from produtos where id in (${marcadores(ids.length)})`)
+      .bind(...ids)
+      .all<Record<string, unknown>>();
+    relacionados = porNome((results ?? []).map(montarResumo));
   }
 
-  return { ...(produto as Produto), relacionados };
+  return { ...produto, relacionados };
 }
 
 export async function listarLogs(filtros?: {
   produtoId?: string;
   autorEmail?: string;
 }): Promise<Log[]> {
-  const supabase = await criarClienteServidor();
+  const db = await banco();
 
-  let consulta = supabase
-    .from("produto_logs")
-    .select("*")
-    .order("criado_em", { ascending: false })
-    .limit(500);
+  const condicoes: string[] = [];
+  const valores: string[] = [];
 
-  if (filtros?.produtoId) consulta = consulta.eq("produto_id", filtros.produtoId);
-  if (filtros?.autorEmail) consulta = consulta.eq("autor_email", filtros.autorEmail);
+  if (filtros?.produtoId) {
+    condicoes.push("produto_id = ?");
+    valores.push(filtros.produtoId);
+  }
+  if (filtros?.autorEmail) {
+    condicoes.push("autor_email = ?");
+    valores.push(filtros.autorEmail);
+  }
 
-  const { data, error } = await consulta;
-  if (error) throw new Error(error.message);
-  return (data ?? []) as Log[];
+  const onde = condicoes.length > 0 ? `where ${condicoes.join(" and ")}` : "";
+  const consulta = db
+    .prepare(`select * from produto_logs ${onde} order by criado_em desc, id desc limit 500`)
+    .bind(...valores);
+
+  const { results } = await consulta.all<Log>();
+  return results ?? [];
 }
 
 export async function listarLogsDoProduto(produtoId: string): Promise<Log[]> {
@@ -83,16 +91,14 @@ export async function listarLogsDoProduto(produtoId: string): Promise<Log[]> {
 
 /** Lista de pessoas que já alteraram alguma coisa, para o filtro da tela de logs. */
 export async function listarAutores(): Promise<{ nome: string; email: string }[]> {
-  const supabase = await criarClienteServidor();
-  const { data } = await supabase
-    .from("produto_logs")
-    .select("autor_nome, autor_email")
-    .order("autor_nome", { ascending: true })
-    .limit(1000);
+  const db = await banco();
+  const { results } = await db
+    .prepare(
+      "select autor_email, max(autor_nome) as autor_nome from produto_logs group by autor_email",
+    )
+    .all<{ autor_email: string; autor_nome: string }>();
 
-  const mapa = new Map<string, string>();
-  (data ?? []).forEach((linha) => mapa.set(linha.autor_email, linha.autor_nome));
-  return [...mapa.entries()]
-    .map(([email, nome]) => ({ email, nome }))
+  return (results ?? [])
+    .map((linha) => ({ email: linha.autor_email, nome: linha.autor_nome }))
     .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
 }

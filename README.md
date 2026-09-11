@@ -4,175 +4,210 @@ A fonte única da verdade sobre cada produto da PM3 — cursos, formações, pó
 in-company, memberships, sprints e stacks. Cada produto tem um registro só, com dono, data de
 atualização e histórico de quem mexeu em quê.
 
-Feito em Next.js + TypeScript + Tailwind, com Supabase (banco de dados e arquivos) e deploy na
-Vercel.
+Feito em Next.js + TypeScript + Tailwind, rodando inteiro na Cloudflare:
 
-> ## ⚠️ Este projeto está em modo de teste, sem login
->
-> Nesta fase não existe tela de entrada: quem abrir o endereço vê e edita tudo. As alterações
-> aparecem no histórico assinadas como "Modo de teste", porque não há como saber quem mexeu.
->
-> Não coloque aqui informação que não possa vazar, e evite divulgar o endereço fora do time.
-> Como religar o login está na [seção 10](#10-como-religar-o-login-depois).
+| Peça | Onde fica |
+|---|---|
+| Aplicação (telas, gravação, rotas) | **Cloudflare Workers** |
+| Banco de dados | **Cloudflare D1** (SQLite) |
+| PDFs dos produtos | **Cloudflare R2** |
+| Quem pode entrar | **Cloudflare Access** |
+
+> Este projeto usa Workers, e não Pages, porque precisa executar lógica no servidor: as telas
+> são renderizadas sob demanda, a gravação passa por server actions e há rotas que leem o banco
+> e entregam arquivos.
+
+**Não existe tela de login neste projeto, e nem deve existir.** Quem decide se a pessoa entra é
+o Cloudflare Access, na borda da rede, antes da requisição chegar na aplicação. Depois que a
+pessoa passa, o Access anexa o e-mail dela na requisição — é assim que o histórico sabe assinar
+cada alteração.
+
+---
+
+## Onde já está no ar
+
+| | |
+|---|---|
+| Endereço | <https://produtos.pm3.com.br> |
+| Conta Cloudflare | `Admins@cursospm3.com.br` (a que tem o domínio pm3.com.br) |
+| Worker | `produtos-pm3` — sem endereço `.workers.dev`, de propósito |
+| Banco D1 | `produtos-pm3` (`2964c432-a7ce-4347-8490-e2f8e45f5b57`), tabelas já criadas |
+| Bucket R2 | `produtos-pm3-pdf`, privado |
+| Access | a organização `cursospm3` já exige identificação nesse endereço |
+
+O catálogo em produção começa **vazio**, de propósito: os produtos de exemplo são fictícios e
+não devem entrar num sistema que é a fonte da verdade. Para cadastrar, use o botão **Novo
+produto**. Se quiser mesmo os exemplos, o comando está no [passo 4](#4-colocar-os-produtos-de-exemplo).
+
+Para publicar uma alteração: `npm run deploy`.
+
+O guia abaixo serve para entender o funcionamento e para refazer o ambiente do zero, se um dia
+for preciso.
 
 ---
 
 ## Índice
 
 1. [O que você vai precisar](#1-o-que-você-vai-precisar)
-2. [Criar o projeto no Supabase](#2-criar-o-projeto-no-supabase)
+2. [Criar o banco e o bucket](#2-criar-o-banco-e-o-bucket)
 3. [Criar as tabelas](#3-criar-as-tabelas)
 4. [Colocar os produtos de exemplo](#4-colocar-os-produtos-de-exemplo)
-5. [Liberar o acesso sem login](#5-liberar-o-acesso-sem-login)
-6. [Rodar no seu computador](#6-rodar-no-seu-computador)
-7. [Subir o código para o GitHub](#7-subir-o-código-para-o-github)
-8. [Publicar na Vercel](#8-publicar-na-vercel)
-9. [Como o sistema funciona](#9-como-o-sistema-funciona)
-10. [Como religar o login depois](#10-como-religar-o-login-depois)
-11. [Como o banco está organizado](#11-como-o-banco-está-organizado)
-12. [Problemas comuns](#12-problemas-comuns)
+5. [Rodar no seu computador](#5-rodar-no-seu-computador)
+6. [Publicar o Worker](#6-publicar-o-worker)
+7. [Proteger com o Cloudflare Access](#7-proteger-com-o-cloudflare-access)
+8. [Como o sistema funciona](#8-como-o-sistema-funciona)
+9. [Como o banco está organizado](#9-como-o-banco-está-organizado)
+10. [Problemas comuns](#10-problemas-comuns)
 
 ---
 
 ## 1. O que você vai precisar
 
-- Uma conta no [Supabase](https://supabase.com) (o plano gratuito serve).
-- Uma conta no [GitHub](https://github.com).
-- Uma conta na [Vercel](https://vercel.com) (dá para entrar com o GitHub).
-- Node.js instalado no computador, se quiser rodar localmente ([nodejs.org](https://nodejs.org)).
+- [Node.js](https://nodejs.org) versão 20 ou mais nova (o instalador padrão serve).
+- Uma conta na Cloudflare com um domínio já apontado para ela (o Access precisa de domínio).
+- Acesso de administrador no painel da Cloudflare, para criar o Access e os recursos.
 
-Nada aqui precisa de cartão de crédito.
+Instale as dependências do projeto uma vez:
+
+```bash
+npm install
+```
+
+E faça login na Cloudflare pelo terminal:
+
+```bash
+npx wrangler login
+```
 
 ---
 
-## 2. Criar o projeto no Supabase
+## 2. Criar o banco e o bucket
 
-1. Entre em [supabase.com](https://supabase.com) e clique em **New project**.
-2. Dê um nome (ex.: `produtos-pm3`), escolha a região **South America (São Paulo)** e crie uma
-   senha para o banco. **Guarde essa senha** num lugar seguro — você não vai precisar dela no
-   dia a dia, mas ela não aparece de novo.
-3. Espere uns 2 minutos até o projeto ficar pronto.
+Rode os dois comandos abaixo. Eles criam o banco de dados e a pasta de arquivos.
+
+```bash
+npx wrangler d1 create produtos-pm3
+npx wrangler r2 bucket create produtos-pm3-pdf
+```
+
+O primeiro comando devolve um `database_id`. **Copie esse identificador e cole no arquivo
+`wrangler.jsonc`**, no lugar de `COLE-AQUI-O-ID-DO-D1`.
+
+O bucket do R2 fica privado, e é assim que tem que ficar: ninguém alcança um PDF pela internet
+sem passar pela aplicação.
 
 ---
 
 ## 3. Criar as tabelas
 
-1. No menu da esquerda do Supabase, clique em **SQL Editor**.
-2. Clique em **New query**.
-3. Abra o arquivo `supabase/schema.sql` deste projeto, copie **tudo** e cole na janela.
-4. Clique em **Run** (ou aperte Ctrl+Enter).
-5. Deve aparecer "Success. No rows returned". Pronto: tabelas, histórico automático e a pasta
-   de PDFs foram criados de uma vez.
+Na sua máquina:
 
-Você só precisa fazer isso uma vez.
+```bash
+npm run banco:local
+```
+
+Em produção:
+
+```bash
+npm run banco:producao
+```
+
+Os dois comandos leem os arquivos da pasta `migrations/` e criam o que ainda não existe. Rodar
+de novo não quebra nada: o que já foi aplicado é pulado.
 
 ---
 
 ## 4. Colocar os produtos de exemplo
 
-Mesma coisa, com o outro arquivo:
-
-1. **SQL Editor** → **New query**.
-2. Copie todo o conteúdo de `supabase/seed.sql`, cole e clique em **Run**.
-
-Isso cadastra os 5 produtos de exemplo (AI Product Leader, Formação em Gestão de Produto,
-Sprint de Discovery com IA, Pós-Tech em Gestão de Produtos Digitais e o evento PM3 On Stage,
-com todos os campos de evento preenchidos) e o histórico de alterações deles.
-
-Se rodar de novo, ele apaga e recria só esses 5 — não mexe em nada que você tiver cadastrado
-depois.
-
----
-
-## 5. Liberar o acesso sem login
-
-O `schema.sql` deixa o banco fechado: só quem entra com e-mail `@pm3.com.br` enxerga alguma
-coisa. Como nesta fase não existe login, é preciso abrir o acesso, senão o catálogo aparece
-vazio.
-
-1. **SQL Editor** → **New query**.
-2. Copie todo o conteúdo de `supabase/modo-teste.sql`, cole e clique em **Run**.
-
-Feito isso, qualquer pessoa com o endereço do site consegue ver e editar os produtos, e o
-histórico passa a registrar as mudanças como "Modo de teste".
-
-**Faça isso só enquanto estiver testando.** Quando quiser fechar de novo, é a
-[seção 10](#10-como-religar-o-login-depois).
-
----
-
-## 6. Rodar no seu computador
-
-1. Baixe/clone este projeto.
-2. Dentro da pasta, copie o arquivo `.env.local.example` e renomeie a cópia para `.env.local`.
-3. No Supabase, vá em **Project Settings → API** e copie:
-   - **Project URL** → cole em `NEXT_PUBLIC_SUPABASE_URL`
-   - **anon public** (a chave pública) → cole em `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-
-   O arquivo fica assim:
-
-   ```
-   NEXT_PUBLIC_SUPABASE_URL=https://abcdefgh.supabase.co
-   NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOi...
-   ```
-
-   **Nunca** use aqui a chave `service_role`.
-
-4. No terminal, dentro da pasta do projeto:
-
-   ```bash
-   npm install
-   ```
-
-   ```bash
-   npm run dev
-   ```
-
-5. Abra <http://localhost:3000>. O catálogo aparece direto, sem pedir nada.
-
----
-
-## 7. Subir o código para o GitHub
-
-Já está no GitHub, em <https://github.com/jaquelinesantospm3/produtos-pm3> (repositório
-privado). Para mandar alterações novas:
+Opcional — serve para ver o catálogo com conteúdo antes de cadastrar os produtos de verdade.
 
 ```bash
-git add -A
+# na sua máquina
+npx wrangler d1 execute produtos-pm3 --local  --file=./banco/exemplos.sql
+
+# em produção
+npx wrangler d1 execute produtos-pm3 --remote --file=./banco/exemplos.sql
 ```
 
-```bash
-git commit -m "descreva o que mudou"
-```
-
-```bash
-git push
-```
-
-O arquivo `.env.local` **não** vai para o GitHub (ele está no `.gitignore`), e é assim que
-tem que ser.
+São 5 produtos, com vínculos e histórico. Pode rodar mais de uma vez: ele apaga e recria só
+esses 5, sem tocar no resto.
 
 ---
 
-## 8. Publicar na Vercel
+## 5. Rodar no seu computador
 
-1. Entre em [vercel.com](https://vercel.com) com sua conta do GitHub.
-2. Clique em **Add New → Project** e escolha o repositório `produtos-pm3`.
-3. A Vercel reconhece o Next.js sozinha. Não mude nada em build.
-4. Antes de clicar em Deploy, abra **Environment Variables** e cadastre as duas mesmas
-   variáveis do `.env.local`:
-   - `NEXT_PUBLIC_SUPABASE_URL`
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-5. Clique em **Deploy** e espere terminar.
-6. Pronto. Toda vez que você fizer `git push`, a Vercel publica sozinha a versão nova.
+```bash
+npm run dev
+```
 
-> Enquanto estiver sem login, o endereço da Vercel fica aberto para quem tiver o link. Se
-> quiser esconder de estranhos durante os testes, dá para ligar o **Deployment Protection**
-> nas configurações do projeto na Vercel — aí só quem tem conta no seu time entra.
+Abra <http://localhost:3000>. O banco e os arquivos usados aqui são cópias locais, guardadas na
+pasta `.wrangler` — mexer à vontade não afeta produção.
+
+Para testar exatamente como vai rodar publicado (aplicação já empacotada no Worker):
+
+```bash
+npm run preview
+```
+
+> Sem o Access na frente, a aplicação não tem como saber quem você é. Nesse caso o histórico
+> assina as alterações como **"Ambiente local"**. Isso vale só na sua máquina.
 
 ---
 
-## 9. Como o sistema funciona
+## 6. Publicar o Worker
+
+```bash
+npm run deploy
+```
+
+O comando monta o pacote e publica em <https://produtos.pm3.com.br>. O subdomínio é criado pelo
+próprio deploy, a partir do bloco `routes` do `wrangler.jsonc`.
+
+Se for a primeira vez, rode também as migrações em produção (passo 3) e, se quiser, os produtos
+de exemplo (passo 4).
+
+> ⚠️ **Um Worker publicado sem o Access na frente fica aberto para qualquer pessoa da
+> internet.** Confira o passo 7 antes de divulgar o link ou cadastrar informação real.
+
+---
+
+## 7. Proteger com o Cloudflare Access
+
+É aqui que o login acontece — fora da aplicação.
+
+> **No ambiente atual isso já está valendo:** abrir <https://produtos.pm3.com.br> sem estar
+> identificado leva para a tela de entrada da organização `cursospm3`. O que vale conferir uma
+> vez em **Zero Trust → Access → Applications** é se a política que cobre esse endereço libera
+> exatamente quem deve entrar (o esperado é *Emails ending in* `@pm3.com.br`) — e não uma regra
+> mais larga, herdada de outro sistema. O roteiro abaixo é para montar do zero.
+
+1. No painel da Cloudflare, entre em **Zero Trust → Access → Applications** e clique em
+   **Add an application → Self-hosted**.
+2. Dê um nome (ex.: `Produtos PM3`) e informe o domínio onde o sistema vai atender
+   (ex.: `produtos.pm3.com.br`). Aponte esse domínio para o Worker em
+   **Workers & Pages → produtos-pm3 → Settings → Domains & Routes**.
+3. Crie uma política de acesso:
+   - **Action:** Allow
+   - **Include → Emails ending in:** `@pm3.com.br`
+
+   Só com isso, qualquer pessoa com e-mail da PM3 entra, e mais ninguém.
+4. Em **Settings → Login methods**, escolha como as pessoas se identificam (Google Workspace,
+   se a PM3 usa; ou o código por e-mail, que não exige configuração nenhuma).
+5. Salve e abra o endereço numa janela anônima para conferir que ele pede identificação.
+
+Depois disso:
+
+- O nome de quem está usando aparece no canto superior direito.
+- O botão de sair usa `/cdn-cgi/access/logout`, que encerra a sessão na própria Cloudflare.
+- Toda alteração no histórico sai assinada com o nome e o e-mail reais da pessoa.
+
+> **Importante:** o sistema deve ser alcançável **apenas** pelo domínio protegido pelo Access.
+> O endereço `.workers.dev` seria um caminho paralelo, sem política nenhuma — por isso o
+> `wrangler.jsonc` traz `"workers_dev": false`. Não ligue de volta.
+
+---
+
+## 8. Como o sistema funciona
 
 **Catálogo** — todos os produtos, com busca por nome ou descrição, filtro por categoria e por
 status. Produtos sem atualização há mais de 90 dias aparecem marcados com "Precisa de revisão".
@@ -188,93 +223,77 @@ aparecem palestrantes, palcos e participantes, mais local, trilhas de conhecimen
 do evento, nomes que já subiram ao palco, patrocinadores (com as edições) e links úteis.
 
 **Logs** — toda alteração de todo produto, com data, campo e resumo do que mudou. Filtra por
-produto e por pessoa. Ninguém escreve nesses registros à mão: o próprio banco de dados grava.
-Enquanto não houver login, todas as linhas saem assinadas como "Modo de teste".
+produto e por pessoa. Ninguém escreve nesses registros à mão: quem grava é a própria aplicação,
+comparando o que estava no banco com o que foi enviado, em `src/lib/historico.ts`.
 
 **Manutenção** — edição rápida só dos campos de governança (dono, time, status, revisão). Para
 mexer no resto, use "Editar todos os campos deste produto" ou o botão **Editar** na página do
 produto.
 
----
-
-## 10. Como religar o login depois
-
-Quando a fase de testes acabar, são dois passos:
-
-1. **No banco:** rode o `supabase/schema.sql` de novo, inteiro, no SQL Editor. Ele restaura as
-   regras restritas por cima das regras abertas do modo de teste e volta a assinar as
-   alterações com nome e e-mail de quem está logado.
-
-2. **No código:** o login por link mágico está pronto no histórico do Git — foi retirado num
-   commit só. Para trazer de volta, desfaça esse commit:
-
-   ```bash
-   git revert $(git log --grep="modo de teste" -i --format=%H -n 1)
-   ```
-
-   Isso devolve a tela de login, o bloqueio por domínio `@pm3.com.br` em todas as camadas, a
-   tela "Meu perfil" e a assinatura automática das alterações. Depois é só apagar o
-   `supabase/modo-teste.sql` e conferir as **Redirect URLs** no Supabase
-   (**Authentication → URL Configuration**): a Site URL precisa ser o endereço da Vercel, e
-   `https://SEU-PROJETO.vercel.app/**` precisa estar na lista, senão o link do e-mail não
-   funciona.
-
-Se preferir, me chame que eu faço essa volta.
+**PDF do produto** — o arquivo enviado no formulário vai para o Worker, que grava no bucket do
+R2. Para baixar, a rota `/produtos/{slug}/pdf` lê o objeto e entrega. Como o bucket é privado e
+o Access está na frente, o arquivo nunca fica exposto.
 
 ---
 
-## 11. Como o banco está organizado
+## 9. Como o banco está organizado
 
-| Tabela                  | Para que serve                                                        |
-| ----------------------- | --------------------------------------------------------------------- |
-| `produtos`              | Um registro por produto, com os campos comuns e os de evento          |
-| `produto_relacionados`  | Liga um produto a outro (vínculo de verdade, não texto solto)         |
-| `produto_logs`          | Histórico de alterações, preenchido automaticamente pelo banco        |
-| `perfis`                | Nome e e-mail de quem usa o sistema (só volta a ser usada com o login) |
+Três tabelas, todas no D1:
 
-**Campos de evento.** Ficam na própria tabela `produtos`, com o prefixo `evento_`
-(`evento_palestrantes`, `evento_local`, `evento_patrocinadores`...). Em produtos que não são
-eventos essas colunas ficam vazias, e a aplicação nem mostra os campos. Optamos por isso em
-vez de uma tabela separada porque a relação seria sempre de um para um: assim a página do
-produto sai numa consulta só e fica mais fácil de entender quem olha a tabela.
+- **`produtos`** — um registro por produto, com tudo que aparece no one-pager.
+- **`produto_relacionados`** — quais produtos se conectam a quais.
+- **`produto_logs`** — o histórico de alterações.
 
-**Histórico automático.** Um gatilho (`trigger`) compara o valor antigo e o novo de cada campo
-a cada alteração e grava uma linha no log com o nome legível do campo, um resumo em português
-e o autor. Vale inclusive para alterações feitas direto no painel do Supabase.
+Não existe tabela de usuários: quem é quem vem do Cloudflare Access.
 
-**PDFs.** Ficam num bucket chamado `produtos-pdf`. O link de download é gerado na hora e vale
-5 minutos, então o arquivo não fica exposto num endereço fixo.
+**Um detalhe que costuma confundir:** o D1 é SQLite, e SQLite não tem coluna de lista. Então as
+listas (dores, diferenciais, módulos, trilhas, patrocinadores, links úteis) ficam guardadas como
+texto em formato JSON. A aplicação converte na leitura e na escrita — ver `src/lib/banco.ts`.
+Se você for consultar o banco na mão, use as funções `json_extract` e `json_array_length` do
+próprio SQLite.
 
 ### Onde mexer no código
 
 ```
 src/app/(app)/            as telas (catálogo, produto, cadastro, logs, manutenção)
+src/app/api/pdf/          recebe o arquivo enviado e grava no R2
 src/actions/              o que grava no banco (server actions)
 src/components/           peças reaproveitadas (campos, tags, upload, barra do topo)
-src/lib/                  tipos, cores, formatação de data e acesso ao Supabase
-supabase/                 schema.sql, seed.sql e modo-teste.sql
+src/lib/acesso.ts         quem está usando, lido dos cabeçalhos do Access
+src/lib/banco.ts          conexão com o D1 e o R2, e a conversão das listas
+src/lib/dados.ts          as consultas de leitura
+src/lib/historico.ts      a comparação que gera o log de alteração
+migrations/               a estrutura do banco
+banco/exemplos.sql        os produtos de exemplo
+wrangler.jsonc            nome do Worker, banco e bucket
 ```
 
 Para mudar as categorias, os times ou o prazo de revisão (hoje 90 dias), edite
-`src/lib/constantes.ts` — e, no caso das categorias, ajuste também a lista permitida em
-`supabase/schema.sql`.
+`src/lib/constantes.ts` — e, no caso das categorias e dos status, ajuste também a lista
+permitida em `migrations/0001_inicial.sql` (numa migração nova, se o banco já estiver em
+produção).
 
 ---
 
-## 12. Problemas comuns
+## 10. Problemas comuns
 
-**O catálogo aparece vazio, mas os produtos estão no Supabase.** — falta rodar o
-`supabase/modo-teste.sql` (seção 5). Sem ele o banco continua fechado para quem não fez login.
+**"D1_ERROR" ou a tela de erro ao abrir o catálogo**
+As tabelas ainda não foram criadas. Rode `npm run banco:local` (ou `npm run banco:producao`).
 
-**"Não conseguimos carregar os produtos".** — confira se as duas variáveis de ambiente estão
-certas (sem espaço sobrando) e se o projeto do Supabase está ativo. Projetos gratuitos sem uso
-por muito tempo entram em pausa e precisam ser reativados no painel.
+**O deploy reclama do `database_id`**
+Você ainda não colou no `wrangler.jsonc` o identificador que o `wrangler d1 create` devolveu.
 
-**Não consigo enviar o PDF.** — o arquivo precisa ser PDF e ter menos de 20 MB. Se continuar,
-verifique se o `modo-teste.sql` foi rodado: é ele que libera o envio sem login.
+**O nome no canto da tela aparece como "Ambiente local"**
+É o esperado quando você roda na sua máquina, onde não há Access. Publicado e com o Access
+configurado, aparece o nome real.
 
-**O produto não aparece no catálogo.** — confira o filtro de categoria e de status no topo da
-lista.
+**Entrei pelo endereço e ele não pediu identificação**
+Ou o Access ainda não foi configurado (passo 7), ou alguém religou o endereço `.workers.dev`,
+que não passa pela política. Desligue esse endereço.
 
-**Todas as alterações aparecem como "Modo de teste".** — é o esperado enquanto não houver
-login. Com o login de volta, cada linha passa a mostrar o nome e o e-mail de quem alterou.
+**O PDF não abre**
+Confira se o produto tem arquivo enviado (a rota devolve 404 quando não tem) e se o bucket do
+R2 foi criado com o mesmo nome que está no `wrangler.jsonc`.
+
+**Mudei os bindings e o TypeScript reclama**
+Rode `npm run tipos` para regerar o `cloudflare-env.d.ts`.

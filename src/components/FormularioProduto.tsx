@@ -523,8 +523,8 @@ export default function FormularioProduto({
           </Campo>
 
           <p className="mb-5 text-xs text-pm3-faint">
-            A data da alteração é gravada automaticamente. Enquanto o sistema estiver sem login,
-            o histórico registra as mudanças como &ldquo;Modo de teste&rdquo;.
+            A data da alteração é gravada automaticamente, e o histórico assina cada mudança com
+            o nome de quem está usando o sistema.
           </p>
 
           <div className="mt-2 flex gap-2">

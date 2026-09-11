@@ -2,13 +2,11 @@
 
 import { useRef, useState } from "react";
 import { Check, FileText, Loader2, X } from "lucide-react";
-import { criarClienteNavegador } from "@/lib/supabase/navegador";
-import { BUCKET_PDF } from "@/lib/constantes";
 
 const TAMANHO_MAXIMO_MB = 20;
 
 /**
- * Envia o PDF direto para o storage do Supabase e devolve o caminho salvo.
+ * Envia o PDF para o Worker, que grava no bucket do R2 e devolve o caminho.
  * O arquivo já fica gravado no envio; o formulário só guarda a referência.
  */
 export default function EnvioPdf({
@@ -39,20 +37,29 @@ export default function EnvioPdf({
     }
 
     setEnviando(true);
-    const supabase = criarClienteNavegador();
-    const caminho = `${crypto.randomUUID()}/${arquivo.name.replace(/[^\w.\-]+/g, "-")}`;
-    const { error } = await supabase.storage.from(BUCKET_PDF).upload(caminho, arquivo, {
-      contentType: "application/pdf",
-      upsert: false,
-    });
-    setEnviando(false);
 
-    if (error) {
+    const corpo = new FormData();
+    corpo.append("arquivo", arquivo);
+
+    try {
+      const resposta = await fetch("/api/pdf", { method: "POST", body: corpo });
+      const dados = (await resposta.json()) as {
+        pdf_nome?: string;
+        pdf_path?: string;
+        erro?: string;
+      };
+
+      if (!resposta.ok || !dados.pdf_path) {
+        setErro(dados.erro ?? "Não conseguimos enviar o arquivo agora. Tente de novo.");
+        return;
+      }
+
+      aoEnviar({ pdf_nome: dados.pdf_nome ?? arquivo.name, pdf_path: dados.pdf_path });
+    } catch {
       setErro("Não conseguimos enviar o arquivo agora. Tente de novo em alguns segundos.");
-      return;
+    } finally {
+      setEnviando(false);
     }
-
-    aoEnviar({ pdf_nome: arquivo.name, pdf_path: caminho });
   }
 
   return (

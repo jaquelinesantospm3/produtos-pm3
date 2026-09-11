@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ClipboardList, LayoutGrid, Wrench } from "lucide-react";
+import { ClipboardList, LayoutGrid, LogOut, Wrench } from "lucide-react";
 
 const ITENS = [
   { href: "/", rotulo: "Catálogo", icone: LayoutGrid },
@@ -10,7 +10,10 @@ const ITENS = [
   { href: "/manutencao", rotulo: "Manutenção", icone: Wrench },
 ];
 
-export default function BarraTopo() {
+/** Endereço padrão de saída do Cloudflare Access. Encerra a sessão na borda. */
+const SAIR = "/cdn-cgi/access/logout";
+
+export default function BarraTopo({ nome, email }: { nome: string; email: string }) {
   const caminho = usePathname();
 
   return (
@@ -38,6 +41,21 @@ export default function BarraTopo() {
               </Link>
             );
           })}
+
+          <span className="mx-2 hidden h-5 w-px bg-pm3-line lg:inline-block" />
+
+          <span className="hidden text-xs text-pm3-faint lg:inline" title={email}>
+            {nome}
+          </span>
+
+          <a
+            href={SAIR}
+            title="Sair"
+            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-pm3-muted transition-colors hover:text-pm3-ink"
+          >
+            <LogOut size={15} />
+            <span className="sr-only">Sair</span>
+          </a>
         </div>
       </div>
     </header>

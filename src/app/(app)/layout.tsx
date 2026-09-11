@@ -1,11 +1,13 @@
 import BarraTopo from "@/components/BarraTopo";
-import AvisoModoTeste from "@/components/AvisoModoTeste";
+import { autorAtual } from "@/lib/acesso";
 
-export default function LayoutApp({ children }: { children: React.ReactNode }) {
+export default async function LayoutApp({ children }: { children: React.ReactNode }) {
+  // Quem está usando vem do Cloudflare Access, não de uma tela de login.
+  const autor = await autorAtual();
+
   return (
     <>
-      <AvisoModoTeste />
-      <BarraTopo />
+      <BarraTopo nome={autor.nome} email={autor.email} />
       {children}
     </>
   );
